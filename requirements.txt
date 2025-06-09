@@ -1,5 +1,3 @@
 streamlit
 transformers
 torch
-accelerate
-sentencepiece==0.1.98
