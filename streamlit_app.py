@@ -128,42 +128,105 @@
 
 
 import streamlit as st
+import os
 
-# Immediately disable Streamlit’s file watcher to avoid torch.classes introspection
-st.set_option("server.fileWatcherType", "none")
+# Disable file watcher to prevent PyTorch conflicts
+os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
 
-import torch
-from transformers import pipeline
+class ModelManager:
+    def __init__(self):
+        self._model = None
+    
+    def get_model(self):
+        if self._model is None:
+            self._load_model()
+        return self._model
+    
+    def _load_model(self):
+        try:
+            # Import PyTorch only when actually needed
+            import torch
+            from transformers import pipeline
+            
+            self._model = pipeline(
+                "text-generation",
+                model="distilgpt2",
+                device=0 if torch.cuda.is_available() else -1,
+                do_sample=True,
+                temperature=0.7,
+                max_new_tokens=100
+            )
+        except ImportError as e:
+            st.error(f"Required libraries not installed: {e}")
+            self._model = None
+        except Exception as e:
+            st.error(f"Error loading model: {e}")
+            self._model = None
 
+# Global model manager
 @st.cache_resource
-def load_generation_model():
-    return pipeline(
-        "text-generation",
-        model="distilgpt2",
-        device=0 if torch.cuda.is_available() else -1,
-        do_sample=True,
-        temperature=0.7,
-        max_new_tokens=100
+def get_model_manager():
+    return ModelManager()
+
+def generate_farming_advice(temp, hum, prec):
+    """Generate farming advice based on weather conditions"""
+    manager = get_model_manager()
+    model = manager.get_model()
+    
+    if model is None:
+        return "Unable to generate AI advice. Please check your environment setup."
+    
+    prompt = (
+        f"Weather Forecast Analysis for Farming:\n"
+        f"Temperature: {temp}°C\nHumidity: {hum}%\nPrecipitation: {prec}mm\n\n"
+        "Based on these conditions, here are key farming recommendations:\n"
+        "1. Crop Selection: With temperature at "
+        f"{temp}°C and humidity at {hum}%, suitable crops include"
     )
+    
+    try:
+        result = model(prompt)
+        advice = result[0]["generated_text"][len(prompt):].split("\n")[0].strip()
+        return advice
+    except Exception as e:
+        return f"Error generating advice: {str(e)}"
 
 def main():
+    st.set_page_config(
+        page_title="Farming Advice Generator",
+        page_icon="🌾",
+        layout="wide"
+    )
+    
     st.title("🌾 Farming Advice Generator")
-    temp = st.sidebar.number_input("Average Temperature (°C)", 0.0, 50.0, 26.7, step=0.1)
-    hum  = st.sidebar.number_input("Average Humidity (%)",    0.0, 100.0, 72.4, step=0.1)
-    prec = st.sidebar.number_input("Average Precipitation (mm)",0.0, 50.0, 4.8,  step=0.1)
-
-    if st.button("Generate Advice"):
-        gen = load_generation_model()
-        prompt = (
-            f"Weather Forecast Analysis for Farming:\n"
-            f"Temperature: {temp}°C\nHumidity: {hum}%\nPrecipitation: {prec}mm\n\n"
-            "Based on these conditions, here are key farming recommendations:\n"
-            "1. Crop Selection: With temperature at "
-            f"{temp}°C and humidity at {hum}%, suitable crops include"
-        )
-        advice = gen(prompt)[0]["generated_text"][len(prompt):].split("\n")[0].strip()
-        st.subheader("AI-Generated Advice")
-        st.write(advice)
+    st.markdown("Get AI-powered farming recommendations based on weather conditions")
+    
+    # Create two columns for better layout
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.subheader("Weather Parameters")
+        temp = st.number_input("Average Temperature (°C)", 0.0, 50.0, 26.7, step=0.1)
+        hum = st.number_input("Average Humidity (%)", 0.0, 100.0, 72.4, step=0.1)
+        prec = st.number_input("Average Precipitation (mm)", 0.0, 50.0, 4.8, step=0.1)
+        
+        generate_button = st.button("🚀 Generate Advice", type="primary")
+    
+    with col2:
+        st.subheader("Weather Summary")
+        st.metric("Temperature", f"{temp}°C")
+        st.metric("Humidity", f"{hum}%")
+        st.metric("Precipitation", f"{prec}mm")
+    
+    if generate_button:
+        with st.spinner('Generating personalized farming advice...'):
+            advice = generate_farming_advice(temp, hum, prec)
+        
+        st.subheader("🌱 AI-Generated Farming Advice")
+        st.success(advice)
+        
+        # Add some additional context
+        st.info("💡 **Tip**: This advice is generated based on the weather conditions you provided. Always consult with local agricultural experts for region-specific recommendations.")
 
 if __name__ == "__main__":
     main()
