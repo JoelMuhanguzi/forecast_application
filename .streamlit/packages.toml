@@ -1,8 +1,7 @@
 [packages]
 apt = ["cmake", "pkg-config"]
 [server]
-fileWatcherType = "poll"
-fileWatcherExcludePaths = ["venv/lib/python3.13/site-packages/torch"]
+fileWatcherType = "none"
 
 
 
