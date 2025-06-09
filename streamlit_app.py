@@ -128,48 +128,35 @@
 
 import streamlit as st
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import pipeline
 
-# Cache LLM load
 @st.cache_resource
-def load_generation_model(model_name="distilgpt2"):
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-    tokenizer.pad_token = tokenizer.eos_token
+def load_generation_model():
     return pipeline(
         "text-generation",
-        model=model,
-        tokenizer=tokenizer,
+        model="distilgpt2",
         device=0 if torch.cuda.is_available() else -1,
-        pad_token_id=tokenizer.eos_token_id,
         do_sample=True,
         temperature=0.7,
         max_new_tokens=100
     )
 
-def generate_farming_advice(gen, temp, hum, prec):
-    prompt = (
-        f"Weather Forecast Analysis for Farming:\n"
-        f"Temperature: {temp}°C\n"
-        f"Humidity: {hum}%\n"
-        f"Precipitation: {prec}mm\n\n"
-        "Based on these conditions, here are key farming recommendations:\n"
-        "1. Crop Selection: With temperature at "
-        f"{temp}°C and humidity at {hum}%, suitable crops include"
-    )
-    out = gen(prompt)[0]["generated_text"]
-    return out[len(prompt):].strip().split("\n")[0]
-
 def main():
     st.title("🌾 Farming Advice Generator")
-    st.sidebar.header("Input Forecast")
     temp = st.sidebar.number_input("Average Temperature (°C)", 0.0, 50.0, 26.7, step=0.1)
-    hum  = st.sidebar.number_input("Average Humidity (%)", 0.0, 100.0, 72.4, step=0.1)
-    prec = st.sidebar.number_input("Average Precipitation (mm)", 0.0, 50.0, 4.8, step=0.1)
+    hum  = st.sidebar.number_input("Average Humidity (%)",    0.0, 100.0, 72.4, step=0.1)
+    prec = st.sidebar.number_input("Average Precipitation (mm)",0.0, 50.0, 4.8,  step=0.1)
 
     if st.button("Generate Advice"):
         gen = load_generation_model()
-        advice = generate_farming_advice(gen, temp, hum, prec)
+        prompt = (
+            f"Weather Forecast Analysis for Farming:\n"
+            f"Temperature: {temp}°C\nHumidity: {hum}%\nPrecipitation: {prec}mm\n\n"
+            "Based on these conditions, here are key farming recommendations:\n"
+            "1. Crop Selection: With temperature at "
+            f"{temp}°C and humidity at {hum}%, suitable crops include"
+        )
+        advice = gen(prompt)[0]["generated_text"][len(prompt):].split("\n")[0].strip()
         st.subheader("AI-Generated Advice")
         st.write(advice)
 
