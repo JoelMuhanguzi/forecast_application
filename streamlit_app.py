@@ -126,7 +126,12 @@
 # if __name__ == "__main__":
 #     main()
 
+
 import streamlit as st
+
+# Immediately disable Streamlit’s file watcher to avoid torch.classes introspection
+st.set_option("server.fileWatcherType", "none")
+
 import torch
 from transformers import pipeline
 
