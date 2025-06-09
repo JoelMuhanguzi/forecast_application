@@ -1,2 +1,5 @@
 [packages]
 apt = ["cmake", "pkg-config"]
+[server]
+fileWatcherType = "none"
+
