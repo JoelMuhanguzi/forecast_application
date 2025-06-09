@@ -129,104 +129,248 @@
 
 import streamlit as st
 import os
+import warnings
 
-# Disable file watcher to prevent PyTorch conflicts
+# CRITICAL: Set these environment variables BEFORE importing any other libraries
 os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
+os.environ["STREAMLIT_SERVER_ENABLE_CORS"] = "false"
 
-class ModelManager:
-    def __init__(self):
-        self._model = None
-    
-    def get_model(self):
-        if self._model is None:
-            self._load_model()
-        return self._model
-    
-    def _load_model(self):
-        try:
-            # Import PyTorch only when actually needed
-            import torch
-            from transformers import pipeline
-            
-            self._model = pipeline(
-                "text-generation",
-                model="distilgpt2",
-                device=0 if torch.cuda.is_available() else -1,
-                do_sample=True,
-                temperature=0.7,
-                max_new_tokens=100
-            )
-        except ImportError as e:
-            st.error(f"Required libraries not installed: {e}")
-            self._model = None
-        except Exception as e:
-            st.error(f"Error loading model: {e}")
-            self._model = None
+# Suppress warnings
+warnings.filterwarnings("ignore")
 
-# Global model manager
-@st.cache_resource
-def get_model_manager():
-    return ModelManager()
-
-def generate_farming_advice(temp, hum, prec):
-    """Generate farming advice based on weather conditions"""
-    manager = get_model_manager()
-    model = manager.get_model()
-    
-    if model is None:
-        return "Unable to generate AI advice. Please check your environment setup."
-    
-    prompt = (
-        f"Weather Forecast Analysis for Farming:\n"
-        f"Temperature: {temp}°C\nHumidity: {hum}%\nPrecipitation: {prec}mm\n\n"
-        "Based on these conditions, here are key farming recommendations:\n"
-        "1. Crop Selection: With temperature at "
-        f"{temp}°C and humidity at {hum}%, suitable crops include"
-    )
-    
+def load_model_safely():
+    """Safely load the model with proper error handling"""
     try:
-        result = model(prompt)
-        advice = result[0]["generated_text"][len(prompt):].split("\n")[0].strip()
-        return advice
+        # Import torch and transformers only when needed
+        import torch
+        from transformers import pipeline, logging
+        
+        # Reduce transformers logging
+        logging.set_verbosity_error()
+        
+        # Load model with better parameters for farming advice
+        model = pipeline(
+            "text-generation",
+            model="distilgpt2",
+            device=-1,  # Force CPU to avoid GPU issues
+            do_sample=True,
+            temperature=0.8,
+            max_new_tokens=150,
+            repetition_penalty=1.2,
+            pad_token_id=50256
+        )
+        return model
     except Exception as e:
-        return f"Error generating advice: {str(e)}"
+        st.error(f"Model loading error: {str(e)}")
+        return None
+
+@st.cache_resource
+def get_model():
+    return load_model_safely()
+
+def generate_better_prompt(temp, hum, prec):
+    """Generate a more specific prompt for better farming advice"""
+    
+    # Determine season/climate conditions
+    if temp < 15:
+        climate = "cool weather"
+    elif temp > 30:
+        climate = "hot weather"
+    else:
+        climate = "moderate weather"
+    
+    if hum > 80:
+        moisture = "high humidity"
+    elif hum < 40:
+        moisture = "low humidity"  
+    else:
+        moisture = "moderate humidity"
+    
+    if prec > 10:
+        rainfall = "high rainfall"
+    elif prec < 2:
+        rainfall = "low rainfall"
+    else:
+        rainfall = "moderate rainfall"
+    
+    prompt = f"""Agricultural Advisory Report:
+Weather Conditions: {climate}, {moisture}, {rainfall}
+Temperature: {temp}°C | Humidity: {hum}% | Precipitation: {prec}mm
+
+Farming Recommendations:
+For these conditions, farmers should focus on crops that thrive in {climate} with {moisture}. 
+Recommended crops include"""
+    
+    return prompt
+
+def clean_generated_text(text, max_sentences=3):
+    """Clean and format the generated text"""
+    # Remove repetitive phrases
+    sentences = text.split('.')
+    unique_sentences = []
+    seen = set()
+    
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if sentence and len(sentence) > 10:
+            # Simple deduplication
+            words = set(sentence.lower().split())
+            if not any(len(words.intersection(prev_words)) > len(words) * 0.7 for prev_words in seen):
+                unique_sentences.append(sentence)
+                seen.add(words)
+                if len(unique_sentences) >= max_sentences:
+                    break
+    
+    return '. '.join(unique_sentences) + '.' if unique_sentences else text
+
+def provide_fallback_advice(temp, hum, prec):
+    """Provide rule-based advice when AI model fails"""
+    advice = []
+    
+    # Temperature-based advice
+    if temp < 15:
+        advice.append("Cool weather crops: lettuce, spinach, peas, carrots, and cabbage thrive in these temperatures")
+    elif temp > 30:
+        advice.append("Heat-tolerant crops: tomatoes, peppers, eggplant, okra, and heat-resistant varieties are recommended")
+    else:
+        advice.append("Moderate temperature crops: most vegetables including beans, corn, squash, and root vegetables will grow well")
+    
+    # Humidity-based advice  
+    if hum > 80:
+        advice.append("High humidity requires good air circulation and disease-resistant varieties to prevent fungal issues")
+    elif hum < 40:
+        advice.append("Low humidity conditions need mulching and frequent watering to retain soil moisture")
+    
+    # Precipitation-based advice
+    if prec > 10:
+        advice.append("High rainfall areas should focus on well-draining soils and crops that handle wet conditions")
+    elif prec < 2:
+        advice.append("Low rainfall requires drought-tolerant crops and efficient irrigation systems")
+    
+    return " | ".join(advice)
 
 def main():
+    # Page configuration
     st.set_page_config(
-        page_title="Farming Advice Generator",
+        page_title="Smart Farming Advisor",
         page_icon="🌾",
-        layout="wide"
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
     
-    st.title("🌾 Farming Advice Generator")
-    st.markdown("Get AI-powered farming recommendations based on weather conditions")
+    st.title("🌾 Smart Farming Advisor")
+    st.markdown("*AI-powered agricultural recommendations based on weather conditions*")
     
-    # Create two columns for better layout
-    col1, col2 = st.columns([1, 2])
+    # Sidebar for inputs
+    with st.sidebar:
+        st.header("📊 Weather Parameters")
+        
+        temp = st.number_input(
+            "🌡️ Average Temperature (°C)", 
+            min_value=0.0, 
+            max_value=50.0, 
+            value=26.7, 
+            step=0.1,
+            help="Enter the average temperature for your area"
+        )
+        
+        hum = st.number_input(
+            "💧 Average Humidity (%)", 
+            min_value=0.0, 
+            max_value=100.0, 
+            value=72.4, 
+            step=0.1,
+            help="Enter the average humidity percentage"
+        )
+        
+        prec = st.number_input(
+            "🌧️ Average Precipitation (mm)", 
+            min_value=0.0, 
+            max_value=100.0, 
+            value=4.8, 
+            step=0.1,
+            help="Enter the average daily precipitation"
+        )
+        
+        st.divider()
+        use_ai = st.checkbox("🤖 Use AI Generation", value=True, help="Uncheck to use rule-based advice")
+    
+    # Main content area
+    col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.subheader("Weather Parameters")
-        temp = st.number_input("Average Temperature (°C)", 0.0, 50.0, 26.7, step=0.1)
-        hum = st.number_input("Average Humidity (%)", 0.0, 100.0, 72.4, step=0.1)
-        prec = st.number_input("Average Precipitation (mm)", 0.0, 50.0, 4.8, step=0.1)
+        st.subheader("📈 Current Conditions")
         
-        generate_button = st.button("🚀 Generate Advice", type="primary")
+        # Weather metrics
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+        with metric_col1:
+            st.metric("Temperature", f"{temp}°C")
+        with metric_col2:
+            st.metric("Humidity", f"{hum}%")
+        with metric_col3:
+            st.metric("Precipitation", f"{prec}mm")
+        
+        # Climate assessment
+        if temp < 15:
+            climate_status = "❄️ Cool Climate"
+        elif temp > 30:
+            climate_status = "🔥 Hot Climate"
+        else:
+            climate_status = "🌤️ Moderate Climate"
+        
+        st.info(f"**Climate Assessment:** {climate_status}")
     
     with col2:
-        st.subheader("Weather Summary")
-        st.metric("Temperature", f"{temp}°C")
-        st.metric("Humidity", f"{hum}%")
-        st.metric("Precipitation", f"{prec}mm")
+        st.subheader("🎯 Generate Advice")
+        
+        if st.button("🚀 Get Farming Recommendations", type="primary", use_container_width=True):
+            
+            if use_ai:
+                # Try AI generation first
+                with st.spinner('🤖 Generating AI-powered advice...'):
+                    model = get_model()
+                    
+                    if model:
+                        try:
+                            prompt = generate_better_prompt(temp, hum, prec)
+                            result = model(prompt, max_length=len(prompt) + 100, num_return_sequences=1)
+                            generated = result[0]["generated_text"]
+                            advice = generated[len(prompt):].strip()
+                            advice = clean_generated_text(advice)
+                            
+                            if len(advice) < 20 or "crop bites" in advice.lower():
+                                # Fallback if AI generates poor output
+                                advice = provide_fallback_advice(temp, hum, prec)
+                                st.warning("🔄 AI generated unclear advice, using expert rules instead")
+                            
+                        except Exception as e:
+                            advice = provide_fallback_advice(temp, hum, prec)
+                            st.warning(f"⚠️ AI model error, using fallback advice: {str(e)}")
+                    else:
+                        advice = provide_fallback_advice(temp, hum, prec)
+                        st.warning("⚠️ AI model unavailable, using rule-based advice")
+            else:
+                # Use rule-based advice directly
+                advice = provide_fallback_advice(temp, hum, prec)
+            
+            # Display results
+            st.subheader("🌱 Farming Recommendations")
+            st.success(advice)
+            
+            # Additional tips
+            with st.expander("💡 Additional Tips"):
+                st.markdown("""
+                **General Farming Tips:**
+                - Always test your soil pH before planting
+                - Consider crop rotation to maintain soil health
+                - Monitor local weather forecasts for sudden changes
+                - Consult with local agricultural extension services
+                - Keep records of what works best in your specific location
+                """)
     
-    if generate_button:
-        with st.spinner('Generating personalized farming advice...'):
-            advice = generate_farming_advice(temp, hum, prec)
-        
-        st.subheader("🌱 AI-Generated Farming Advice")
-        st.success(advice)
-        
-        # Add some additional context
-        st.info("💡 **Tip**: This advice is generated based on the weather conditions you provided. Always consult with local agricultural experts for region-specific recommendations.")
+    # Footer
+    st.divider()
+    st.markdown("*⚠️ This tool provides general guidance. Always consult local agricultural experts for region-specific advice.*")
 
 if __name__ == "__main__":
     main()
